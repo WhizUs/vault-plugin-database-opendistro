@@ -115,3 +115,17 @@ $ curl -s -k -X POST https://localhost:9200/test-index-1/_doc \
   "_primary_term":14
 }
 ```
+
+## Development
+
+The Vault plugin system is documented on the [Vault documentation site](https://www.vaultproject.io/docs/internals/plugins.html).
+
+You will need to define a plugin directory using the `plugin_directory` configuration directive, then place the `vault-plugin-database-elasticsearch` executable generated above in the directory.
+
+Register the plugin using
+
+``` shell script
+vault write sys/plugins/catalog/vault-plugin-database-elasticsearch \
+    sha256=$(sha256sum bin/vault-plugin-database-elasticsearch) \
+    command="vault-plugin-database-elasticsearch"
+```
