@@ -3,101 +3,90 @@
 
 This plugin provides unique, short-lived credentials for Elasticsearch using OpenDistro.
 
+Tested with Opendistro Security Plugin 1.6.0 and Vault 1.4.1.
+
 ## Getting Started
 
 For this plugin to work, you must first install [OpenDistro](https://opendistro.github.io/for-elasticsearch/).
 
-### Create a User for Vault
+### Build
 
-```shell script
-$ curl \
-    -s \
-    -X PUT \
-    -H "Content-Type: application/json" \
-    -d '{
-          "password": "vault"
-        }' \
-    -u admin:admin \  
-    http://localhost:9200/_opendistro/_security/api/internalusers/vault
+To build this plugin simply run
+
+```bash
+$ go build -o build/vault-plugin-database-opendistro ./cmd/vault-plugin-database-opendistro
 ```
 
-```shell script
-$ curl \
-    -s \
-    -X PUT \
-    -H "Content-Type: application/json" \
-    -d '{
-          "users" : [ "vault" ]
-        }' \
-    -u admin:admin \
-    http://localhost:9200/_opendistro/_security/api/rolesmapping/security_rest_api_access
+### Configure
+
+Enable database secrets engine
+
+```bash
+$ vault secrets enable -path=example database
 ```
 
-## Enable OpenDistro Plugin in Vault
+Configure which roles can be used with 
 
-```shell script
-$ vault write sys/plugins/catalog/database/opendistro \
-    sha_256=9b9bd77c725a5cdb9bf0a75005b153acb73a66beeb5998a85d902e4af043e705 \
-    command=vault-plugin-database-opendistro
-```
-
-```shell script
-$ vault secrets enable database
-```
-
-```shell script
-$ vault write configs \
+```bash
+$ vault write example/config/opendistro \
     plugin_name="vault-plugin-database-opendistro" \
     allowed_roles="internally-defined-role,externally-defined-role" \
-    username=vault \
-    password=vault \
-    url=https://localhost:9200 \
-    ca_cert=$PWD/root-ca.pem \
-    client_cert=$PWD/kirk.pem \
-    client_key=$PWD/kirk-key.pem \
+    username=admin \
+    password=admin \
+    url=http://localhost:9200 \
     insecure=true
 ```
 
-```shell script
-$ vault write database/roles/externally-defined-role \
-    db_name=opendistro \
-    creation_statements='{ 
-                            "opendistro_role_permissions": { 
-                              "index_permissions": [
-                                { 
-                                  "index_patterns": [
-                                    "test-index-*"
-                                  ], 
-                                  "allowed_actions": [
-                                    "unlimited"
-                                  ] 
-                                }
-                              ]
-                            }
-                          }' \
-    default_ttl="1h" \ 
-    max_ttl="24h"
+Define external role which will be used when new users a generated
+
+```bash
+vault write example/roles/externally-defined-role \
+  db_name=opendistro \
+  creation_statements='{ 
+                          "opendistro_role_permissions": { 
+                            "index_permissions": [ 
+                              { 
+                                "index_patterns": [ 
+                                  "test-index-*" 
+                                ], 
+                                "allowed_actions": [ 
+                                  "unlimited" 
+                                ] 
+                              } 
+                            ] 
+                          } 
+                        }' \
+  default_ttl="10m" \
+  max_ttl="30m"
 ```
 
-```shell script
-$ vault read database/creds/externally-defined-role                                                                                                                                                                                                              
+### Generate User
+
+Read the cred by previously defined role
+
+```bash
+$ vault read example/creds/externally-defined-role
   Key                Value
   ---                -----
-  lease_id           database/creds/externally-defined-role/w0MfpmzZ0jkWAyS1rnOvICSg
-  lease_duration     1h
+  lease_id           example/creds/externally-defined-role/w0MfpmzZ0jkWAyS1rnOvICSg
+  lease_duration     10m
   lease_renewable    true
   password           A1a-9TzAGce3tbyePZvZ
   username           v_token_externally-defi_KxTRtdypZt5z4Dpy9AWW_1572991043
 ```
 
-```shell script
-$ curl -s -k -X POST https://localhost:9200/test-index-1/_doc \
+Try to add a new document with the new user and pass
+
+```bash
+$ curl -s -k -X POST http://localhost:9200/test-index-1/_doc \
       -H "Content-Type: application/json" \
       -u v_token_externally-defi_KxTRtdypZt5z4Dpy9AWW_1572991043:A1a-9TzAGce3tbyePZvZ \ 
       -d '{
             "name":"test"
           }' | jq
 ```
+
+Expected result looks like this
 
 ```json
 {
@@ -120,12 +109,12 @@ $ curl -s -k -X POST https://localhost:9200/test-index-1/_doc \
 
 The Vault plugin system is documented on the [Vault documentation site](https://www.vaultproject.io/docs/internals/plugins.html).
 
-You will need to define a plugin directory using the `plugin_directory` configuration directive, then place the `vault-plugin-database-elasticsearch` executable generated above in the directory.
+You will need to define a plugin directory using the `plugin_directory` configuration directive, then place the `vault-plugin-database-opendistro` executable generated above in the directory.
 
 Register the plugin using
 
 ``` shell script
-vault write sys/plugins/catalog/vault-plugin-database-elasticsearch \
-    sha256=$(sha256sum bin/vault-plugin-database-elasticsearch) \
-    command="vault-plugin-database-elasticsearch"
+vault write sys/plugins/catalog/vault-plugin-database-opendistro \
+    sha256=$(shasum -a 256 vault-plugin-database-opendistro | cut -d " " -f 1) \
+    command="vault-plugin-database-opendistro"
 ```
