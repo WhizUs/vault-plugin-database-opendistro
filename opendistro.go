@@ -17,7 +17,6 @@ import (
 	"github.com/hashicorp/vault/sdk/database/helper/dbutil"
 
 	od "github.com/WhizUs/go-opendistro"
-	"github.com/WhizUs/go-opendistro/common"
 	odsec "github.com/WhizUs/go-opendistro/security"
 )
 
@@ -147,8 +146,16 @@ func (o *Opendistro) CreateUser(ctx context.Context, statements dbplugin.Stateme
 		return "", "", errwrap.Wrapf("unable to read creation_statements: {{err}}", err)
 	}
 
+	var roles []string
+	if stmt.NewRolePermissions != nil {
+		roles = []string{username}
+	} else {
+		roles = stmt.PreexistingRoles
+	}
+
 	user := &odsec.UserCreate{
 		Password: password,
+		Roles:    roles,
 	}
 
 	// Don't let anyone write the configs while we're using it for our current client.
@@ -170,25 +177,6 @@ func (o *Opendistro) CreateUser(ctx context.Context, statements dbplugin.Stateme
 	// Just create a user
 	if err := client.Security.Users.Create(ctx, username, user); err != nil {
 		return "", "", errwrap.Wrapf(fmt.Sprintf("unable to create user name %s, user %q: {{err}}", username, user), err)
-	}
-
-	//
-	roleMappingRelations := &odsec.RoleMappingRelations{
-		Users: []string{
-			username,
-		},
-	}
-
-	if stmt.NewRolePermissions != nil {
-		if err = client.Security.Rolesmapping.Create(ctx, username, roleMappingRelations); err != nil {
-			return "", "", errwrap.Wrapf(fmt.Sprintf("unable to create rolesmapping %s, rolesmapping %q: {{err}}", username, roleMappingRelations), err)
-		}
-	} else {
-		for _, value := range stmt.PreexistingRoles {
-			if err = client.Security.Rolesmapping.Create(ctx, value, roleMappingRelations); err != nil {
-				return "", "", errwrap.Wrapf(fmt.Sprintf("unable to create rolesmapping %s, rolesmapping %q: {{err}}", value, roleMappingRelations), err)
-			}
-		}
 	}
 
 	return username, password, nil
@@ -217,43 +205,8 @@ func (o *Opendistro) RevokeUser(ctx context.Context, statements dbplugin.Stateme
 	var errs error
 
 	if stmt.NewRolePermissions != nil {
-		if err := client.Security.Rolesmapping.Delete(ctx, username); err != nil {
-			errs = multierror.Append(errs, errwrap.Wrapf(fmt.Sprintf("unable to delete rolesmapping name %s: {{err}}", username), err))
-		}
-
 		if err := client.Security.Roles.Delete(ctx, username); err != nil {
 			errs = multierror.Append(errs, errwrap.Wrapf(fmt.Sprintf("unable to delete role name %s: {{err}}", username), err))
-		}
-	} else {
-		for _, value := range stmt.PreexistingRoles {
-
-			roleMapping, err := client.Security.Rolesmapping.Get(ctx, value)
-			if err != nil {
-				errs = multierror.Append(errs, errwrap.Wrapf(fmt.Sprintf("unable to get role mapping %s: {{err}}", value), err))
-			}
-
-			var replacement []string
-
-			for _, user := range roleMapping.Users {
-				if user != value {
-					replacement = append(replacement, user)
-				}
-			}
-
-			patches := &[]common.Patch{
-				{
-					Op:   "replace",
-					Path: "/" + value,
-					Value: map[string]interface{}{
-						"users": replacement,
-					},
-				},
-			}
-
-			// For whatever reason it only works with this method...
-			if err := client.Security.Rolesmapping.Update(ctx, value, patches); err != nil {
-				errs = multierror.Append(errs, errwrap.Wrapf(fmt.Sprintf("unable to remove user %s from rolesmapping name %s: {{err}}", username, value), err))
-			}
 		}
 	}
 
